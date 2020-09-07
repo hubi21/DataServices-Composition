@@ -265,6 +265,7 @@ if __name__ == "__main__":
     s.config(command=ent.yview)
     ent.config(yscrollcommand=s.set)
     lab.pack(side=LEFT)
+      
     def on_focusin(event):
       print("Mouse position: (%s %s)" % (event.x, event.y))
       print("Single Click, Button-l")
