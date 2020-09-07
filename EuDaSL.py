@@ -1,312 +1,364 @@
-from Tkinter import *
-import Tkinter as tk
-#from Tkinter.ttk import Frame, Button, Style,Treeview
-from PIL import Image, ImageDraw, ImageTk, ImageFont
+import gc
+import re
+import multiprocessing
+import inspect
+from inspect import signature
+from quality_score import reliability,availibility,reputation,cost
+import csv
+import math
+from formules_saw import quality_score
+import time
+import itertools
+import copy
+import numpy as np
+from knapsack01 import knapSack
+import pandas as pd
+from criticalpath import Node
+import queue
+import glob
+import os
+from time import sleep
+import threading
+from Service_lake import *
+
+## remove all executable query plans constructed in previous executions/ compositions..
+for f in glob.glob('Plans/*.csv'): # find all csv files
+    os.remove(f)# if file name starts with ExecutableOredering, delete it
+timef=0.
+Plans=[]
 
 
-fields =  'Maximal Cost', 'Response Time'
-nbqueries = 1
+####Construct Combinations and remove duplicates #####
+def myproduct(*args):
+    pools = map(tuple, args)
+    result = [[]]
+    for pool in pools:
+        nresult = []
+        for x in result:
+            for y in pool:
+                if not x+[y] in nresult:
+                            nresult.append(list(set(x+[y])))
+        result=nresult
+        result1=[]
+    for el in result:
+        if not el in result1:
+            result1.append(el)
+    return result1
 
-class Placeholder_State(object):
-     __slots__ = 'normal_color', 'normal_font', 'placeholder_text', 'placeholder_color', 'placeholder_font', 'with_placeholder'
+#1. identify Relevant Data services Service 
+def worker0():
+    while True:
+        item = conjuncts.get()
+        if item is None:
+            break
+        identify_function(item)
+        conjuncts.task_done()
 
-def add_placeholder_to(entry, placeholder, color="grey", font=None):
-    normal_color = entry.cget("fg")
-    normal_font = entry.cget("font")
-    if font is None:
-        font = normal_font
-    state = Placeholder_State()
-    state.normal_color=normal_color
-    state.normal_font=normal_font
-    state.placeholder_color=color
-    state.placeholder_font=font
-    state.placeholder_text = placeholder
-    state.with_placeholder=True
+def identify_function(conjunct):
+    RelevantViews[conjunct[0]]=set()
+    for service_view in services_views.keys():
+        for parameter in services_views[service_view]:
+            if type(parameter[len(parameter)-1])== type(conjunct[len(conjunct)-1]) and parameter[0] ==conjunct[0]:
+                i=1
+                l=len(parameter)-1
+                if l>2:
+                    while i<l:
+                        map=conjunct[i],'-->',parameter[i]
+                        i=i+1
+                        RelevantViews[conjunct[0]].update({service_view.ide})
+                        Mappings[service_view].update({map})
+                else:
+                        map=conjunct[1],'-->',parameter[1]
+                        RelevantViews[conjunct[0]].update({service_view.ide})
+                        Mappings[service_view].update({map})
+       
+#2. create executable query plans
+def worker(Res,BindAvail):
+    while True:
+        item = combinations.get()
+        if item is None:
+            break
+        plan,executable=create_function(item,Res,BindAvail)
+        if executable:
+            evaluate_plan(plan)
+        combinations.task_done()
+def create_function(combination,Res,BindAvail):
+    combinations=copy.copy(combination)
+    #**********new combination processing*********
+    Qout={}
+    j=1
+    #create the ordering graph
+    executable=True
+    pred2=''
+    predecessors=[]
+    valeurs = []
+    namep=str("projet")
+    p = Node(namep)
+    l={}
+    while len(combination) > 0 and not BindAvail < Res:
+        Exec=[]
+        #determine the set of data services which can be executed at iteration i(i.e.,all its required inputs are available)
+        for servic in combination:
+            for ser in Service_lake:
+                if ser.ide==servic:
+                    service=ser
+            if set(service.inputs).issubset(BindAvail):
+                Exec.append(service)
+        if not Exec:
+            executable=False
+        else:
+            for service in Exec:
+                l[str(service.ide)]=p.add(Node(str(service.ide), duration=int(service.response_time),lag=0))
+                predd='"'
+                pred2=pred2+service.name+' '+str(service.response_time)+' '
+                if len(predecessors)>1:
+                    for pr in predecessors:
+                        for service1 in Service_lake:
+                            if service1.name==pr:
+                                p.link(l[str(service.ide)],l[str(service1.ide)])
+                                predd=predd+str(service1.ide)+','
+                                pred2=pred2+str(service1.name)+' '
+                    Index=len(predd)-1
+                    Name_list = list(predd)
+                    Name_list[Index] = '"'
+                    predd = "".join(Name_list)
+                elif len(predecessors)==1:
+                    for service1 in Service_lake:
+                        if service1==predecessors[0]:
+                            p.link(l[str(service.ide)],l[str(service1.ide)])
+                            predd=str(service1.ide)
+                            pred2=pred2+str(service1.name)+' '
+                if predd=='"':
+                   predd=''
+                valeurs.append([str(service.ide),service.name,str(service.response_time),predd,str(0)])
+                pred2=pred2+str("\n ")
+                for out in service.outputs:
+                    BindAvail.add(out)
+                #check here the content of BindAvail
+                combination.remove(service.ide)
+        predecessors=[]
+        for service in Exec:
+            predecessors.append(service)
+    if executable:        
+        #!! identify the critical path for a plan P, elapsed time and critical services !!
+        p.update_all()
+        s=p.get_critical_path()
+        t=p.duration
+        P=Plan(combinations,pred2,s,t)
+        Plans.append(P)
+        ii=P.ide
+        file=str("Plans/"+"ExecutableOrdering"+str(ii)+".csv")
+        f = open(file, 'w')
+        ligneEntete = ",".join(entetes) + "\n"
+        f.write(ligneEntete)
+        n=0
+        for valeur in valeurs:
+            ligne = ",".join(valeur) + "\n"
+            f.write(ligne)
+            n+=1
+        f.close()
+        df = pd.read_csv("Plans/"+"ExecutableOrdering"+str(ii)+".csv")
+        for i in range(0,n):
+            for servic in P.incl_services:
+                if df.at[i,"id"]==servic:
+                    for ser in Service_lake:
+                        if ser.ide==servic:
+                            service=ser
+                    p=calls_number(service,str("Plans/"+"ExecutableOrdering"+str(ii)+".csv"))
+                    df.at[i, "critical"]= 1
+                    df.at[i,"calls_number"]=p
+        df.to_csv("Plans/"+"ExecutableOrdering"+str(ii)+".csv", index=False)
+        P.Ordering_file=file
+    else:
+        print("this plan is not executable")
+    return P,executable
 
-    def on_focusin(event, entry=entry, state=state):
-        if state.with_placeholder:
-            entry.delete(0, "end")
-            entry.config(fg = state.normal_color, font=state.normal_font)
-            #entry.config(state='disabled')
-            state.with_placeholder = False
+def evaluate_plan(plan):
+    plan.cost=cost(str(plan.Ordering_file))
+    plan.reputation=reputation(str(plan.Ordering_file))
+    plan.availibility=availability(str(plan.Ordering_file))
+    plan.reliability=reliability(plan)
 
-    def on_focusout(event, entry=entry, state=state):
-        if entry.get() == '':
-            entry.insert(5, state.placeholder_text)
-            entry.config(fg = state.placeholder_color, font=state.placeholder_font)
-            state.with_placeholder = True
+# determine the Number of estimated web calls
+def calls_number(s,P):
+    nc=1
+    precedents=[]
+    with open(P, 'rt') as f2:
+        reader = csv.reader(f2) 
+        for row in reader:
+            if(str(row[1])==s.name):
+                precedents=row[3].split(',')
+    f2.close()
+    if precedents:
+        for pred in precedents:
+            nc1=1
+            avg=1
+            for service in Service_lake:
+                if str(service.ide)==pred:
+                    spred=service
+                    nc1=calls_number(spred,P)
+                    avg=spred.avg
+            nc= nc * nc1 * avg
+    s.calls_number=nc
+    return nc
 
-    entry.insert(0, placeholder)
-    entry.config(fg = color, font=font)
-    entry.bind('<FocusIn>', on_focusin, add="+")
-    entry.bind('<FocusOut>', on_focusout, add="+")
-    entry.placeholder_state = state
-    return state
+def cost(P):
+    cost=0
+    with open(P, 'rt') as f2:
+        reader = csv.reader(f2) 
+        for row in reader:
+            for s in Service_lake:
+                if(str(row[1])==s.name):
+                    cost=cost+s.calls_number * s.cost
+        return cost
 
+def reputation(P):
+    somme = 0 
+    n=1
+    with open(P, 'rt') as f2:
+        reader = csv.reader(f2) 
+        for row in reader:
+            for s in Service_lake:
+                if(str(row[1])==s.name):
+                    somme = somme + s.reputation
+                    n=n+1
+        return (somme/n)
 
-def run(entries,root):
-   Queries={}
-   print (">>>>>>>>>,",entries)
-   for entry in entries[1]:
-      field = entry[0]
-      s  = (entry[1].get("1.0",END).splitlines())
-      print('%s: "%s"' % (field, s)) 
-      test=True
-      i=1
-      while test and i<len(s):
-         start=str('Query ')+str(i)
-         result = s[i-1][7:]
-         if result==None:
-            test=False
-         else:
-            print(result)
-            if not result=='':
-               Queries[start]=result.split(',')
-            i+=1
-   print("Queries:")
-   for el in Queries:
-      print(el)
-      print(Queries[el])
-   for entry in entries[0]:
-      field = entry[0]
-      if field=='Maximal Cost':
-         if not entry[1].get()=='Maximal Cost...':
-           print('oui')
-           Cost=int(entry[1].get())
-           print(Cost)
-      elif field=='Response Time':
-         if not entry[1].get()=='Response Time...':
-           print('oui')
-           Time=int(entry[1].get())
-           print(Time)
-      text  = entry[1].get()
-      print('%s: "%s"' % (field, text)) 
-   for entry in entries[2]:
-      field = entry[0]
-      text  = entry[1].get()
-      if text==1:
-         print('%s: "%s"' % (field, text)) 
-   data= Cost
-   ##data is a dictionnary of all results that will be appeared in Page2
-   p2 = Page2(data)
-   p2.place(in_=root, x=0, y=0, relwidth=1, relheight=1)
+def reliability(P):
+    product = 1
+    with open(P.Ordering_file, 'rt') as f2:
+        reader = csv.reader(f2) 
+        for row in reader:
+            if not row[0]=='id':
+                for service in Service_lake:
+                    if str(row[0])==str(service.ide):
+                        res = 1
+                        for k in range(int(float(row[5]))+1):
+                            res=res*service.reliability
+                        product = product * res
+        return product         
 
-def reset(ents):
-   for entry in ents[0]:
-      entry[1].delete(0,END)
-   for entry in ents[1]:
-      entry[1].delete('1.0', END)
-      for i in range(1,9): 
-         entry[1].insert(END, "Query %d\n"%i, 'RED')
-         entry[1].tag_config('RED', foreground='grey',font=('verdana', 16))
-   for entry in ents[2]:
-      entry[1].set(0)
+def availability(P):
+    product = 1
+    with open(P, 'rt') as f2:
+        reader = csv.reader(f2) 
+        for row in reader:
+            if not row[0]=='id':
+                for service in Service_lake:
+                    if str(row[0])==str(service.ide):
+                        res = 1
+                        for k in range(int(float(row[5]))+1):
+                            res=res*service.availibility
+                        product = product * res
+        return product 
 
+##Create a csv file to represent a Query Plan 
+entetes = [
+     u'id',
+     u'name',
+     u'duration',
+     u'predecessors',
+     u'critical',
+     u'calls_number'
+]
+project=[]
+Plans=[]
+c=1
 
+##Specification of services views
+RelevantViews={}
+Mappings={}
+Queries={}
+combinations=queue.Queue()
 
-class Page(tk.Frame):
-    def __init__(self, *args, **kwargs):
-        tk.Frame.__init__(self, *args, **kwargs)
-    def show(self):
-        self.lift()
+###Example of Data queries
+Queries["Q1"]=[Recording('a'),Title(a,'t'),PUID(a,'p')]
+#Queries["Q(t, p, a, lc)"]=[Book('ob'), BookPublisher(ob, "p"), Author("oa"),AuthorName(oa, "a"), Publisher("op"), Location(op, "lc"), PublisherName(op, "p"),Wrote(oa, ob), Publication(op, ob)]
+#Queries["Q1"]=[Book('ob'), Title(ob,"t"), BookAuthor(ob, "a"), BookPublisher(ob, "p"), Author("oa"),AuthorName(oa, "a"), Publisher("op"), Location(op, "lc"), PublisherName(op, "p"),Wrote(oa, ob), Publication(op, ob)]
 
+services_views = {}
+for service in Service_lake:
+    services_views[service]=(service.view).view
 
+#I. Selection and Composition of the Relevant Service Views
+#Specification of Mappings
+for service_view in services_views.keys():
+    Mappings[service_view]=set()
 
-class Page1(Page):
-   def __init__(self, ):
-      pass
-      
-class Page2(Page):
-   def __init__(self, data):
-       Page.__init__(self)
-       # tree = Treeview(self)
-       self.data = data
-       print('>>>>>>>>>>>>>>>>>>>',self.data)
-       from defuse import knap
-       a,b,s,Plans=knap(data)
-       print('>>>>>>>>>>>> a , b',a,b)
-       label = tk.Label(self, text="The set of executable query plans:")
-       tree = Treeview(self, columns=('Execution Cost','Response Time','Reputation','Results number'))
-       tree.heading('#0', text='Data Services')
-       tree.heading('#1', text='Execution Cost')
-       tree.heading('#2', text='Response Time')
-       tree.heading('#4', text='Results number')
-       tree.heading('#3', text='Reputation')
-       tree.column('#4',stretch=tk.YES)
-       tree.column('#3', stretch=tk.YES)
-       tree.column('#1', stretch=tk.YES)
-       tree.column('#2', stretch=tk.YES)
-       tree.column('#0', stretch=tk.YES)
-       tree.grid(row=4, columnspan=6, sticky='nsew')
-       i=0
-       for planid in s:
-        i=i+1
-        for plan in Plans:
-          if plan.ide==planid:
-            rep=plan.reputation
-            cost=plan.cost
-            tree.insert('', 'end', text = "Plan"+str(i), values=(cost,"----",rep,"--"))
-       tree.insert('', 'end', text = "Total", values=(b,"----",a,"--"), tags = ('oddrow',))
-       tree.tag_configure('oddrow', background='light blue')
-       tree.pack()
-       save = Button(self, text='Save Results', cursor='exchange')
-       save.pack(side=TOP, padx=5, pady=5)
-       b1 = Button(self, text='Run', cursor='exchange')
-       b1.pack(side=RIGHT, padx=5, pady=5)
-       b2 = Button(self, text='Select Plans', cursor='exchange')
-       b2.pack(side=RIGHT, padx=5, pady=5)
-       b3 = Button(self, text='Confirm', cursor='exchange')
-       b3.pack(side=RIGHT, padx=5, pady=5)
+# 1. Identify Relevant Service Views 
 
-
-class Page3(Page):
-   def __init__(self, *args, **kwargs):
-       Page.__init__(self, *args, **kwargs)
-       label = tk.Label(self, text="This is page 3")
-       label.pack(side="top", fill="both", expand=True)
-
-
-class MainView(tk.Frame):
-    def __init__(self, row,root):
-      s =Scrollbar(row)
-      ent = Text(row, height=15, width=20)
-      lab = Label(row, width=15,  text='Data Queries', anchor='w')
-      row.pack(side=TOP, fill=X, padx=5, pady=5)
-      s.pack(side=RIGHT, fill=Y)
-      ent.pack(side=RIGHT, expand=YES, fill=X)
-      s.config(command=ent.yview)
-      ent.config(yscrollcommand=s.set)
-      lab.pack(side=LEFT)
-      def on_focusin(event):
-        print("Mouse position: (%s %s)" % (event.x, event.y))
-        print("Single Click, Button-l")
-        ent.delete(0, "end")
-        ent.insert(0, '') #Insert blank for user input
-        ent.config(fg = 'black')
-      ent.bind('<FocusIn>', on_focusin, add="+")
-      totalqueries = 1
-      for i in range(1,3): 
-       ent.insert(END, "Query %d " %i,"RED")
-       ent.tag_config('RED', foreground='grey',font=('black', 20))
-       ent.insert(END, ":    First User Query \n","NED")
-       ent.tag_config('NED', foreground='black',font=('black', 20))
-       texts.append(('Data Queries',ent))
-      #Separator
-      seperatorFrame=Frame(root)
-      seperatorFrame.pack(side=TOP, fill=X, padx=5, pady=10)
-      buttonAddquerry = Button(seperatorFrame, text='Add Querry',command=(lambda e=[]: addquery1(ent)))
-      buttonAddquerry.pack(side=RIGHT, padx=700, pady=1)
-      seperatorFrame=Frame(root)
-      seperatorFrame.pack( fill=X, padx=5, pady=10)
-      #Fields
-      for field in fields:
-       seperatorFrame=Frame(root)
-       seperatorFrame.pack( fill=X, padx=5, pady=10)
-       row = Frame(root)
-       lab = Label(row, width=15, text=field, anchor='w')
-       ent1 = Entry(row)
-       add_placeholder_to(ent1, field+str('...'))
-       row.pack(side=TOP, fill=X, padx=5, pady=5)
-       lab.pack(side=LEFT)
-       ent1.pack(side=RIGHT, expand=YES, fill=X)
-       entries.append((field, ent1))
-       row=Frame(root)
-      lab=Label(root, text="Selection Method:",width=18, anchor='w')   
-      row.pack(side=LEFT, fill=X, padx=5, pady=5)
-      lab.pack(side=LEFT)
-
-      v1 = IntVar()
-      v3 = IntVar()
-      v2 = IntVar()
-
-      m1 = Checkbutton(root, text="Optimal Plan", variable=v1)
-      m2 = Checkbutton(root, text="Knapsack M.", variable=v2)
-      m3 = Checkbutton(root, text="All possible Plans", variable=v3)
-      m1.var=v1
-      m2.var=v2
-      m3.var=v3
-      #select
-      m2.select()
-      print (v1,v2,v3)
-      m1.pack(side=LEFT)
-      m2.pack(side=LEFT)
-      m3.pack(side=LEFT)
+conjuncts=queue.Queue()
+for conjunct in Queries["Q1"]:
+    conjuncts.put(conjunct)
+def knap(Cost):
+    threads=[]
+    thr=multiprocessing.cpu_count()
+    for i in range(thr):
+        t = threading.Thread(target=worker0, args=())
+        t.start()
+        threads.append(t)
+    conjuncts.join()
+    for i in range(thr):
+        conjuncts.put(None)
+    for t in threads:
+        t.join()
+    #print("mappings between the selected relevant views and the data query")
+    Mappingss=[]
+    for Rview in Mappings:
+        vi=(Rview.view).name
+        si=re.search(r".*?(?=\()", vi)
+        Mappingss.append(si)
+    ## Creation of all possible combinations between different buckets
+    #######1.Construct a list of different constructed buckets Bi
+    Buckets=[]
+    nn=0
+    for bucket in RelevantViews.values():
+        c=list(bucket)
+        c.sort(key=int)
+        if not c in Buckets:
+            Buckets.append(c)
+            nn+=len(c)
+    #print("Buckets are already constructed")
+    comb=myproduct(*Buckets)
+    for el in comb:
+        combinations.put(el)
     
-      Checkbuttons.append(('Optimal Plan', v1))
-      Checkbuttons.append(('Knapsack M.', v2))
-      Checkbuttons.append(('All possible Plans', v3))
-     
-      inputRun=[]
-      inputRun.append(entries)
-      inputRun.append(texts)
-      inputRun.append(Checkbuttons)
+    # 2. Creation of Executable Query Plans
+    co=1
+    Res={'author', 'language', 'publisher'}
+    BindAvail0={'isbn'}
+    threads = []
+    for i in range(4):
+        t = threading.Thread(target=worker, args=(Res,BindAvail0,))
+        t.start()
+        threads.append(t)
+    combinations.join()
+    for i in range(4):
+        combinations.put(None)
+    for t in threads:
+        t.join()
+    W=[1]
+    ## 1: if positive criteria, otherwise 0
+    C=[1]
+    if len(Plans) >1:
+        n=len(Plans)-1
+        Q=np.full((n+1, 1), 0.)
+        for i in range(0,n+1):
+            Q[i,0]=Plans[i].reputation
+        wt=[] ###weight/cost of each plan
+        i=1
+        for plan in Plans:
+            wt.append(100*plan.cost)
+            i+=1
+        Quality=quality_score(Q,W,C)
+        val=[]
+        for el in Quality:
+            a=el
+            val.append(a*100)
+        W = Cost ###maximal cost(threshold to not be exceeded)
+        a,b,s=knapSack(W*100, wt, val, n+1)
+    else:
+        print(str(Plans[0])+"is the only possible plan that can be executed costing "+str(Plans[0].cost)+" dollars, returning results in "+str(Plans[0].response_time)+" seconds, with a reputation equals to "+str(Plans[0].reputation)+", "+str(Plans[0].availibility)+" of availibility"+" , and "+str(Plans[0].reliability)+" of reliability.")
+    return a,b,s,Plans
 
-      #root.bind('<Return>', (lambda event, e=ents: fetch(e)))   
-      b3 = Button(root, text='Quit', command=root.quit,cursor='X_cursor')
-      b3.pack(side=RIGHT, padx=5, pady=5)
-      b2 = Button(root, text='Run', command=(lambda e=inputRun: run(e,root)),cursor='sb_right_arrow')
-      b2.pack(side=RIGHT, padx=5, pady=5)
-      b1 = Button(root, text='Reset',
-        command=(lambda e=inputRun: reset(e)), cursor='exchange')
-      #b1.place(relx=-0.5, rely=0.5, anchor=CENTER)
-      b1.pack(side=RIGHT, padx=5, pady=5)
-      #main = MainView(root)
-
-def addnewQuery(queriesFrame,totalqueries):
-    newqueriesFrame2=Frame(queriesFrame)
-    newqueriesFrame2.pack(side=TOP, fill=X, padx=3, pady=3)
-    lab = Label(newqueriesFrame2, width=15,  text='Data Queries'+str(totalqueries), anchor='w')
-    lab.pack(side=LEFT)
-    print("Add query")
-    s =Scrollbar(newqueriesFrame2)
-    ent = Text(newqueriesFrame2, height=2, width=3)
-    ent2 = Text(newqueriesFrame2, height=2, width=3)
-    ent2.pack(side=RIGHT, expand=YES, fill=X)
-    ent.pack(side=RIGHT, expand=YES, fill=X)
-    s.config(command=ent.yview)
-    ent.config(yscrollcommand=s.set)
-    ent2.config(yscrollcommand=s.set)
-    ent.insert(END, "new Query" , 'RED')
-    ent2.insert(END, "New Query" , 'RED')
-    ent.tag_config('RED', foreground='grey',font=('verdana', 16))
-    ent2.tag_config('RED', foreground='black',font=('verdana', 16))
-    texts.append(('Data Queries',ent))
-
-def addquery1(ent):
-    value = len(texts)+1
-    ent.insert(END, "Query %d\n"%value, 'RED')
-    ent.tag_config('RED', foreground='grey',font=('verdana', 16))
-    texts.append(('Data Queries',ent))
-
-
-if __name__ == "__main__":
-    root2 = tk.Tk()
-    root2.geometry("1500x1000")
-    root2.title("EuDaSL: On Enriching User-Centered Data Integration Schemas in Service Lakes")  
-    ### Background canvas
-    root=Canvas(root2)
-    root.pack(expand=True, fill=BOTH)
-    image1=PhotoImage(file="").zoom(2)
-    root.img=image1
-    root.create_image(400, 150, anchor=NW, image=image1)
- 
-     entries = []
-     texts=[]
-     Checkbuttons=[]
-    #Main Page 
-    tiltleFrame=Frame(root)
-    tiltleFrame.pack(side=TOP, padx=10, pady=10)
-    photo = tk.PhotoImage(file="")
-    w = tk.Label (tiltleFrame,height=150,width=1000,image =photo)
-    w.pack(fill=Y)
-    #Separator
-    seperatorFrame=Frame(root)
-    seperatorFrame.pack(side=TOP, fill=X, padx=5, pady=10)
-    #frame for Queries
-    queriesFrame=Frame(root)
-    queriesFrame.pack(side=TOP, fill=X, padx=5, pady=5)
-    #Separator
-    seperatorFrame=Frame(root)
-    seperatorFrame.pack(side=TOP, fill=X, padx=5, pady=10)
-    MainView(queriesFrame,root)
-    root.mainloop()
+#knap(200)
