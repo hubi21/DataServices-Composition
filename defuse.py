@@ -3,6 +3,7 @@ import gc
 import re
 import multiprocessing
 import inspect
+from inspect import signature
 from quality_score import reliability,availibility,reputation,cost
 import csv
 import math
@@ -12,36 +13,23 @@ import itertools
 import copy
 import numpy as np
 from knapsack01 import knapSack
-
-from Service_Lake import *
+import pandas as pd
 from criticalpath import Node
-import Queue
+import queue
 import glob
 import os
 from time import sleep
 import threading
-import time
+from Service_lake import *
+
+## remove all executable query plans constructed in previous executions/ compositions..
+for f in glob.glob('Plans/*.csv'): # find all csv files
+    os.remove(f)# if file name starts with ExecutableOredering, delete it
+timef=0.
+Plans=[]
 
 
-#Define the structure of a query plan
-class Plan:
-    count=0
-    def __init__(self,incl_services=None,exec_ordering=None,criticalS=None,response_time=None,Ordering_file=None,reliability=None,reputation=None,cost=None,availibility=None,quality_score=None):
-        Plan.count+=1
-        self.ide= Plan.count
-        self.exec_ordering=exec_ordering
-        self.incl_services=incl_services
-        #self.matchings=matchings
-        self.criticalS=criticalS
-        self.response_time=response_time
-        self.reputation=reputation
-        self.reliability=reliability
-        self.availibility=availibility
-        self.response_time=response_time
-        self.cost=cost
-        self.quality_score=quality_score
-
-####Construct Combinations and remove duplicates 
+####Construct Combinations and remove duplicates #####
 def myproduct(*args):
     pools = map(tuple, args)
     result = [[]]
@@ -58,6 +46,7 @@ def myproduct(*args):
             result1.append(el)
     return result1
 
+#1. identify Relevant Data services Service 
 def worker0():
     while True:
         item = conjuncts.get()
@@ -65,7 +54,7 @@ def worker0():
             break
         identify_function(item)
         conjuncts.task_done()
-        
+
 def identify_function(conjunct):
     RelevantViews[conjunct[0]]=set()
     for service_view in services_views.keys():
@@ -83,21 +72,20 @@ def identify_function(conjunct):
                         map=conjunct[1],'-->',parameter[1]
                         RelevantViews[conjunct[0]].update({service_view.ide})
                         Mappings[service_view].update({map})
-     
-
+       
+#2. create executable query plans
 def worker(Res,BindAvail):
     while True:
         item = combinations.get()
         if item is None:
             break
-        time_t=time.clock()
         plan,executable=create_function(item,Res,BindAvail)
         if executable:
             evaluate_plan(plan)
         combinations.task_done()
-        
 def create_function(combination,Res,BindAvail):
     combinations=copy.copy(combination)
+    #**********new combination processing*********
     Qout={}
     j=1
     #create the ordering graph
@@ -147,16 +135,16 @@ def create_function(combination,Res,BindAvail):
                 pred2=pred2+str("\n ")
                 for out in service.outputs:
                     BindAvail.add(out)
+                #check here the content of BindAvail
                 combination.remove(service.ide)
         predecessors=[]
         for service in Exec:
             predecessors.append(service)
     if executable:        
+        #!!! identify the critical path for a plan P, elapsed time and critical services !!! 
         p.update_all()
         s=p.get_critical_path()
         t=p.duration
-        time_c=time.clock()
-        timeff=timef+time.clock()-time_c
         P=Plan(combinations,pred2,s,t)
         Plans.append(P)
         ii=P.ide
@@ -186,16 +174,13 @@ def create_function(combination,Res,BindAvail):
         print("this plan is not executable")
     return P,executable
 
-##determine the QoS values of a plan P
 def evaluate_plan(plan):
     plan.cost=cost(str(plan.Ordering_file))
     plan.reputation=reputation(str(plan.Ordering_file))
     plan.availibility=availability(str(plan.Ordering_file))
     plan.reliability=reliability(plan)
 
-
-
-##compute the estimated number of web calls
+# determine the Number of estimated web calls
 def calls_number(s,P):
     nc=1
     precedents=[]
@@ -218,8 +203,6 @@ def calls_number(s,P):
     s.calls_number=nc
     return nc
 
-
-##Compute the total execution cost of a service composition
 def cost(P):
     cost=0
     with open(P, 'rt') as f2:
@@ -230,7 +213,6 @@ def cost(P):
                     cost=cost+s.calls_number * s.cost
         return cost
 
-##Compute the reputation of a service composition
 def reputation(P):
     somme = 0 
     n=1
@@ -243,7 +225,6 @@ def reputation(P):
                     n=n+1
         return (somme/n)
 
-##Compute the reliability of a service composition
 def reliability(P):
     product = 1
     with open(P.Ordering_file, 'rt') as f2:
@@ -258,8 +239,6 @@ def reliability(P):
                         product = product * res
         return product         
 
-
-##Compute the availability of a service composition
 def availability(P):
     product = 1
     with open(P, 'rt') as f2:
@@ -267,7 +246,6 @@ def availability(P):
         for row in reader:
             if not row[0]=='id':
                 for service in Service_lake:
-                   # print("ddddd")
                     if str(row[0])==str(service.ide):
                         res = 1
                         for k in range(int(float(row[5]))+1):
@@ -275,15 +253,7 @@ def availability(P):
                         product = product * res
         return product 
 
-
-for f in glob.glob('Plans/*.csv'): # find all csv files
-    #print(f)
-    os.remove(f)# if file name starts with ExecutableOredering, delete it
-
-timef=0.
-Plans=[]
-
-##Create a csv file to represent query plans
+##Create a csv file to represent a Query Plan 
 entetes = [
      u'id',
      u'name',
@@ -294,36 +264,36 @@ entetes = [
 ]
 project=[]
 Plans=[]
-
 c=1
-     
 
-
-###########################################Specification of services views###################################################
+##Specification of services views
 RelevantViews={}
 Mappings={}
 Queries={}
-combinations=Queue.Queue()
+combinations=queue.Queue()
+
+###Example of Data queries
 Queries["Q1"]=[Recording('a'),Title(a,'t'),PUID(a,'p')]
 #Queries["Q(t, p, a, lc)"]=[Book('ob'), BookPublisher(ob, "p"), Author("oa"),AuthorName(oa, "a"), Publisher("op"), Location(op, "lc"), PublisherName(op, "p"),Wrote(oa, ob), Publication(op, ob)]
 #Queries["Q1"]=[Book('ob'), Title(ob,"t"), BookAuthor(ob, "a"), BookPublisher(ob, "p"), Author("oa"),AuthorName(oa, "a"), Publisher("op"), Location(op, "lc"), PublisherName(op, "p"),Wrote(oa, ob), Publication(op, ob)]
-#print(Book(ob).__class)
+
 services_views = {}
 for service in Service_lake:
     services_views[service]=(service.view).view
-#############################################I. Selection and Composition of the Relevant Service Views#########################################
-#####################################################Specification of Mappings#########################################################
+
+#I. Selection and Composition of the Relevant Service Views
+#Specification of Mappings
 for service_view in services_views.keys():
     Mappings[service_view]=set()
-#1. Identify Relevant Service Views
-conjuncts=Queue.Queue()
-start_time_prog = time.clock()
+
+# 1. Identify Relevant Service Views 
+
+conjuncts=queue.Queue()
 for conjunct in Queries["Q1"]:
     conjuncts.put(conjunct)
 def knap(Cost):
     threads=[]
     thr=multiprocessing.cpu_count()
-
     for i in range(thr):
         t = threading.Thread(target=worker0, args=())
         t.start()
@@ -333,13 +303,14 @@ def knap(Cost):
         conjuncts.put(None)
     for t in threads:
         t.join()
+    #print("mappings between the selected relevant views and the data query")
     Mappingss=[]
     for Rview in Mappings:
         vi=(Rview.view).name
         si=re.search(r".*?(?=\()", vi)
         Mappingss.append(si)
-    # Creation of all possible combinations between different buckets
-    #1.Construct a list of different constructed buckets Bi
+    ## Creation of all possible combinations between different buckets
+    #######1.Construct a list of different constructed buckets Bi
     Buckets=[]
     nn=0
     for bucket in RelevantViews.values():
@@ -348,14 +319,16 @@ def knap(Cost):
         if not c in Buckets:
             Buckets.append(c)
             nn+=len(c)
+    #print("Buckets are already constructed")
     comb=myproduct(*Buckets)
     for el in comb:
         combinations.put(el)
+    
+    # 2. Creation of Executable Query Plans
     co=1
     Res={'author', 'language', 'publisher'}
     BindAvail0={'isbn'}
     threads = []
-    start_time_2 = time.clock()
     for i in range(4):
         t = threading.Thread(target=worker, args=(Res,BindAvail0,))
         t.start()
@@ -366,7 +339,7 @@ def knap(Cost):
     for t in threads:
         t.join()
     W=[1]
-    # 1: if positive criteria, otherwise 0
+    ## 1: if positive criteria, otherwise 0
     C=[1]
     if len(Plans) >1:
         n=len(Plans)-1
@@ -383,12 +356,10 @@ def knap(Cost):
         for el in Quality:
             a=el
             val.append(a*100)
-        ####value to maximize =quality score 
         W = Cost ###maximal cost(threshold to not be exceeded)
         a,b,s=knapSack(W*100, wt, val, n+1)
     else:
         print(str(Plans[0])+"is the only possible plan that can be executed costing "+str(Plans[0].cost)+" dollars, returning results in "+str(Plans[0].response_time)+" seconds, with a reputation equals to "+str(Plans[0].reputation)+", "+str(Plans[0].availibility)+" of availibility"+" , and "+str(Plans[0].reliability)+" of reliability.")
-    print("---Total Response Time --- %s seconds ---" % (time.clock() - start_time_prog))
     return a,b,s,Plans
 
-#knap(200,Queries)
+#knap(200)
