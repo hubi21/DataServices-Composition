@@ -13,10 +13,8 @@ class Placeholder_State(object):
 def add_placeholder_to(entry, placeholder, color="grey", font=None):
     normal_color = entry.cget("fg")
     normal_font = entry.cget("font")
-    
     if font is None:
         font = normal_font
-
     state = Placeholder_State()
     state.normal_color=normal_color
     state.normal_font=normal_font
@@ -28,32 +26,25 @@ def add_placeholder_to(entry, placeholder, color="grey", font=None):
     def on_focusin(event, entry=entry, state=state):
         if state.with_placeholder:
             entry.delete(0, "end")
-
             entry.config(fg = state.normal_color, font=state.normal_font)
             #entry.config(state='disabled')
-        
             state.with_placeholder = False
 
     def on_focusout(event, entry=entry, state=state):
         if entry.get() == '':
             entry.insert(5, state.placeholder_text)
             entry.config(fg = state.placeholder_color, font=state.placeholder_font)
-            
             state.with_placeholder = True
 
     entry.insert(0, placeholder)
     entry.config(fg = color, font=font)
-
     entry.bind('<FocusIn>', on_focusin, add="+")
     entry.bind('<FocusOut>', on_focusout, add="+")
-    
     entry.placeholder_state = state
-
     return state
 
 
 def run(entries,root):
-
    Queries={}
    print (">>>>>>>>>,",entries)
    for entry in entries[1]:
@@ -95,12 +86,7 @@ def run(entries,root):
       text  = entry[1].get()
       if text==1:
          print('%s: "%s"' % (field, text)) 
-
-
-
    data= Cost
-
-
    ##data is a dictionnary of all results that will be appeared in Page2
    p2 = Page2(data)
    p2.place(in_=root, x=0, y=0, relwidth=1, relheight=1)
@@ -160,16 +146,11 @@ class Page2(Page):
             rep=plan.reputation
             cost=plan.cost
             tree.insert('', 'end', text = "Plan"+str(i), values=(cost,"----",rep,"--"))
-        
-
        tree.insert('', 'end', text = "Total", values=(b,"----",a,"--"), tags = ('oddrow',))
        tree.tag_configure('oddrow', background='light blue')
-
        tree.pack()
-
        save = Button(self, text='Save Results', cursor='exchange')
        save.pack(side=TOP, padx=5, pady=5)
-
        b1 = Button(self, text='Run', cursor='exchange')
        b1.pack(side=RIGHT, padx=5, pady=5)
        b2 = Button(self, text='Select Plans', cursor='exchange')
@@ -209,23 +190,14 @@ class MainView(tk.Frame):
        ent.tag_config('RED', foreground='grey',font=('black', 20))
        ent.insert(END, ":    First User Query \n","NED")
        ent.tag_config('NED', foreground='black',font=('black', 20))
-
-
-
        texts.append(('Data Queries',ent))
-
       #Separator
       seperatorFrame=Frame(root)
       seperatorFrame.pack(side=TOP, fill=X, padx=5, pady=10)
-
-
       buttonAddquerry = Button(seperatorFrame, text='Add Querry',command=(lambda e=[]: addquery1(ent)))
       buttonAddquerry.pack(side=RIGHT, padx=700, pady=1)
-
       seperatorFrame=Frame(root)
       seperatorFrame.pack( fill=X, padx=5, pady=10)
-
-
       #Fields
       for field in fields:
        seperatorFrame=Frame(root)
@@ -239,8 +211,6 @@ class MainView(tk.Frame):
        ent1.pack(side=RIGHT, expand=YES, fill=X)
        entries.append((field, ent1))
        row=Frame(root)
-
-
       lab=Label(root, text="Selection Method:",width=18, anchor='w')   
       row.pack(side=LEFT, fill=X, padx=5, pady=5)
       lab.pack(side=LEFT)
@@ -261,19 +231,15 @@ class MainView(tk.Frame):
       m1.pack(side=LEFT)
       m2.pack(side=LEFT)
       m3.pack(side=LEFT)
-
-
+    
       Checkbuttons.append(('Optimal Plan', v1))
       Checkbuttons.append(('Knapsack M.', v2))
       Checkbuttons.append(('All possible Plans', v3))
-
-
+     
       inputRun=[]
       inputRun.append(entries)
       inputRun.append(texts)
       inputRun.append(Checkbuttons)
-
-
 
       #root.bind('<Return>', (lambda event, e=ents: fetch(e)))   
       b3 = Button(root, text='Quit', command=root.quit,cursor='X_cursor')
@@ -283,22 +249,14 @@ class MainView(tk.Frame):
       b1 = Button(root, text='Reset',
         command=(lambda e=inputRun: reset(e)), cursor='exchange')
       #b1.place(relx=-0.5, rely=0.5, anchor=CENTER)
-
       b1.pack(side=RIGHT, padx=5, pady=5)
       #main = MainView(root)
 
-
-
-
-
-entries = []
-texts=[]
 def addnewQuery(queriesFrame,totalqueries):
     newqueriesFrame2=Frame(queriesFrame)
     newqueriesFrame2.pack(side=TOP, fill=X, padx=3, pady=3)
     lab = Label(newqueriesFrame2, width=15,  text='Data Queries'+str(totalqueries), anchor='w')
     lab.pack(side=LEFT)
-  
     print("Add query")
     s =Scrollbar(newqueriesFrame2)
     ent = Text(newqueriesFrame2, height=2, width=3)
@@ -306,15 +264,10 @@ def addnewQuery(queriesFrame,totalqueries):
     ent2.pack(side=RIGHT, expand=YES, fill=X)
     ent.pack(side=RIGHT, expand=YES, fill=X)
     s.config(command=ent.yview)
-
-    #s.pack(side=RIGHT, fill=Y)
-
     ent.config(yscrollcommand=s.set)
     ent2.config(yscrollcommand=s.set)
     ent.insert(END, "new Query" , 'RED')
     ent2.insert(END, "New Query" , 'RED')
-
-     #ent.insert(END, '')
     ent.tag_config('RED', foreground='grey',font=('verdana', 16))
     ent2.tag_config('RED', foreground='black',font=('verdana', 16))
     texts.append(('Data Queries',ent))
@@ -337,33 +290,23 @@ if __name__ == "__main__":
     root.img=image1
     root.create_image(400, 150, anchor=NW, image=image1)
  
-
-
-    Checkbuttons=[]
-
+     entries = []
+     texts=[]
+     Checkbuttons=[]
     #Main Page 
-
-    ## Dauphine image 
     tiltleFrame=Frame(root)
     tiltleFrame.pack(side=TOP, padx=10, pady=10)
     photo = tk.PhotoImage(file="")
-
     w = tk.Label (tiltleFrame,height=150,width=1000,image =photo)
     w.pack(fill=Y)
-    
     #Separator
     seperatorFrame=Frame(root)
     seperatorFrame.pack(side=TOP, fill=X, padx=5, pady=10)
-
     #frame for Queries
     queriesFrame=Frame(root)
     queriesFrame.pack(side=TOP, fill=X, padx=5, pady=5)
-
-
     #Separator
     seperatorFrame=Frame(root)
     seperatorFrame.pack(side=TOP, fill=X, padx=5, pady=10)
-
     MainView(queriesFrame,root)
-
     root.mainloop()
